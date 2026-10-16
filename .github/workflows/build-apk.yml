@@ -30,22 +30,16 @@ jobs:
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
-
-          echo "Android SDK location: $ANDROID_HOME"
-          ls -la "$ANDROID_HOME"
+          echo "Android SDK: $ANDROID_HOME"
 
       - name: Install Android SDK packages
         shell: bash
         run: |
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \
+            -type f -name sdkmanager -print -quit)
 
-          if [ ! -f "$SDKMANAGER" ]; then
-            SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \
-              -type f -name sdkmanager -print -quit)
-          fi
-
-          if [ -z "$SDKMANAGER" ] || [ ! -f "$SDKMANAGER" ]; then
-            echo "ERROR: sdkmanager was not found."
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager not found."
             exit 1
           fi
 
@@ -65,7 +59,7 @@ jobs:
           elif [ -f "AbuHamzaStore_APK_Build_Ready-1.zip" ]; then
             echo "zip_file=AbuHamzaStore_APK_Build_Ready-1.zip" >> "$GITHUB_OUTPUT"
           else
-            echo "ERROR: No project ZIP file found."
+            echo "ERROR: Project ZIP not found."
             exit 1
           fi
 
@@ -78,7 +72,8 @@ jobs:
             -d project-unpacked
 
           SETTINGS_FILE=$(find project-unpacked \
-            -type f \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -type f \
+            \( -name settings.gradle -o -name settings.gradle.kts \) \
             -print -quit)
 
           if [ -z "$SETTINGS_FILE" ]; then
@@ -90,12 +85,61 @@ jobs:
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
           echo "Project directory: $PROJECT_DIR"
-          ls -la "$PROJECT_DIR"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
+
+      - name: Fix Java and Kotlin JVM targets
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path("project-unpacked")
+
+          gradle_files = list(root.rglob("*.gradle"))
+          gradle_files += list(root.rglob("*.gradle.kts"))
+
+          for file in gradle_files:
+              text = file.read_text(encoding="utf-8")
+              original = text
+
+              # Set Java source and target compatibility to Java 17.
+              text = re.sub(
+                  r'JavaVersion\.VERSION_1_8',
+                  'JavaVersion.VERSION_17',
+                  text
+              )
+
+              # Set Kotlin JVM target to 17 in common Gradle syntax.
+              text = re.sub(
+                  r'(?m)(jvmTarget\s*=\s*)["\']1\.8["\']',
+                  r'\g<1>"17"',
+                  text
+              )
+
+              text = re.sub(
+                  r'(?m)(jvmTarget\s*=\s*)["\']8["\']',
+                  r'\g<1>"17"',
+                  text
+              )
+
+              # Handle Kotlin compilerOptions syntax.
+              text = re.sub(
+                  r'JvmTarget\.JVM_1_8',
+                  'JvmTarget.JVM_17',
+                  text
+              )
+
+              if text != original:
+                  file.write_text(text, encoding="utf-8")
+                  print(f"Updated JVM settings: {file}")
+              else:
+                  print(f"No matching JVM settings: {file}")
+          PY
 
       - name: Check project files
         shell: bash
@@ -107,7 +151,7 @@ jobs:
 
           if [ ! -f "$PROJECT_DIR/app/build.gradle" ] && \
              [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
-            echo "ERROR: App Gradle build file not found."
+            echo "ERROR: App Gradle file not found."
             exit 1
           fi
 
@@ -138,7 +182,7 @@ jobs:
           mkdir -p output
           cp "$APK" output/AbuHamzaStore-debug.apk
 
-          echo "APK successfully generated:"
+          echo "APK generated successfully."
           ls -lh output/AbuHamzaStore-debug.apk
 
       - name: Upload APK
