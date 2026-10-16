@@ -7,6 +7,9 @@ on:
       - 'AbuHamzaStore_APK_Build_Ready-1.zip'
       - '.github/workflows/build-apk.yml'
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -24,19 +27,62 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Accept Android SDK licenses
+        run: |
+          yes | sdkmanager --licenses || true
+
       - name: Extract project
         run: |
+          set -e
+
+          ZIP_FILE="AbuHamzaStore_APK_Build_Ready-1.zip"
+
+          test -f "$ZIP_FILE"
+
           mkdir -p project-unpacked
-          unzip -o AbuHamzaStore_APK_Build_Ready-1.zip -d project-unpacked
-          find project-unpacked -name settings.gradle -o -name settings.gradle.kts | head -n 1 | xargs -r dirname > project_path.txt
-          test -s project_path.txt
+          unzip -o "$ZIP_FILE" -d project-unpacked
+
+          PROJECT_FILE=$(find project-unpacked \
+            -type f \
+            \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -print -quit)
+
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: Could not find settings.gradle"
+            exit 1
+          fi
+
+          dirname "$PROJECT_FILE" > project_path.txt
+
+          echo "Project directory:"
+          cat project_path.txt
 
       - name: Build APK
         run: |
+          set -e
+
           PROJECT_DIR="$(cat project_path.txt)"
           cd "$PROJECT_DIR"
+
+          if [ ! -f gradlew ]; then
+            echo "ERROR: gradlew was not found"
+            exit 1
+          fi
+
           chmod +x gradlew
-          ./gradlew assembleDebug
+
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Find APK
+        run: |
+          find project-unpacked -type f -name '*.apk' -print
+
+          if ! find project-unpacked -type f \
+            -path '*/build/outputs/apk/debug/*.apk' \
+            | grep -q .; then
+            echo "ERROR: Debug APK was not generated"
+            exit 1
+          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
