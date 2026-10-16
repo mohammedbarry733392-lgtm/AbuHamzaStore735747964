@@ -27,9 +27,12 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          log-accepted-android-sdk-licenses: false
 
-      - name: Install Android SDK components
+      - name: Install required Android SDK packages
         run: |
+          yes | sdkmanager --licenses || true
           sdkmanager --install \
             "platform-tools" \
             "platforms;android-35" \
@@ -44,62 +47,41 @@ jobs:
           elif [ -f "AbuHamzaStore_APK_Build_Ready-1.zip" ]; then
             echo "zip_file=AbuHamzaStore_APK_Build_Ready-1.zip" >> "$GITHUB_OUTPUT"
           else
-            echo "ERROR: No project ZIP file found in repository."
+            echo "ERROR: No project ZIP found."
             exit 1
           fi
-
-          echo "Selected project: $(cat "$GITHUB_OUTPUT")"
 
       - name: Extract project
         shell: bash
         run: |
           mkdir -p project-unpacked
-
-          unzip -o "${{ steps.select_zip.outputs.zip_file }}" \
-            -d project-unpacked
+          unzip -o "${{ steps.select_zip.outputs.zip_file }}" -d project-unpacked
 
           SETTINGS_FILE=$(find project-unpacked \
-            \( -name settings.gradle -o -name settings.gradle.kts \) \
-            -type f -print -quit)
+            -type f \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -print -quit)
 
           if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: settings.gradle was not found."
+            echo "ERROR: Gradle settings file not found."
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$SETTINGS_FILE")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Project directory: $PROJECT_DIR"
-          ls -la "$PROJECT_DIR"
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
-      - name: Check project files
-        shell: bash
+      - name: Check project
         run: |
-          if [ ! -d "$PROJECT_DIR/app" ]; then
+          test -d "$PROJECT_DIR/app" || {
             echo "ERROR: app directory not found."
             exit 1
-          fi
-
-          if [ ! -f "$PROJECT_DIR/app/build.gradle" ] && \
-             [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
-            echo "ERROR: App Gradle build file not found."
-            exit 1
-          fi
-
-          if [ ! -f "$PROJECT_DIR/build.gradle" ] && \
-             [ ! -f "$PROJECT_DIR/build.gradle.kts" ]; then
-            echo "ERROR: Root Gradle build file not found."
-            exit 1
-          fi
+          }
 
       - name: Build debug APK
-        shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           if [ -f "./gradlew" ]; then
@@ -110,10 +92,8 @@ jobs:
           fi
 
       - name: Verify APK
-        shell: bash
         run: |
-          APK=$(find "$PROJECT_DIR" \
-            -type f \
+          APK=$(find "$PROJECT_DIR" -type f \
             -path "*/build/outputs/apk/debug/*.apk" \
             -print -quit)
 
@@ -122,12 +102,8 @@ jobs:
             exit 1
           fi
 
-          echo "APK found: $APK"
-
           mkdir -p output
           cp "$APK" output/AbuHamzaStore-debug.apk
-
-          echo "APK size:"
           ls -lh output/AbuHamzaStore-debug.apk
 
       - name: Upload APK
