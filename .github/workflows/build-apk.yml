@@ -25,16 +25,15 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      name: Set up Android SDK
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Install Android SDK components
         run: |
-          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
-
-      - name: Install Android SDK components
-        run: |
-          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
       - name: Select project ZIP
         id: select_zip
@@ -45,19 +44,26 @@ jobs:
           elif [ -f "AbuHamzaStore_APK_Build_Ready-1.zip" ]; then
             echo "zip_file=AbuHamzaStore_APK_Build_Ready-1.zip" >> "$GITHUB_OUTPUT"
           else
-            echo "ERROR: No project ZIP file found."
+            echo "ERROR: No project ZIP file found in repository."
             exit 1
           fi
 
+          echo "Selected project: $(cat "$GITHUB_OUTPUT")"
+
       - name: Extract project
+        shell: bash
         run: |
           mkdir -p project-unpacked
-          unzip -o "${{ steps.select_zip.outputs.zip_file }}" -d project-unpacked
 
-          SETTINGS_FILE=$(find project-unpacked -name settings.gradle -o -name settings.gradle.kts | head -n 1)
+          unzip -o "${{ steps.select_zip.outputs.zip_file }}" \
+            -d project-unpacked
+
+          SETTINGS_FILE=$(find project-unpacked \
+            \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -type f -print -quit)
 
           if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: settings.gradle or settings.gradle.kts was not found."
+            echo "ERROR: settings.gradle was not found."
             exit 1
           fi
 
@@ -73,18 +79,27 @@ jobs:
           gradle-version: '8.7'
 
       - name: Check project files
+        shell: bash
         run: |
           if [ ! -d "$PROJECT_DIR/app" ]; then
             echo "ERROR: app directory not found."
             exit 1
           fi
 
-          if [ ! -f "$PROJECT_DIR/app/build.gradle" ] && [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
+          if [ ! -f "$PROJECT_DIR/app/build.gradle" ] && \
+             [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
             echo "ERROR: App Gradle build file not found."
             exit 1
           fi
 
+          if [ ! -f "$PROJECT_DIR/build.gradle" ] && \
+             [ ! -f "$PROJECT_DIR/build.gradle.kts" ]; then
+            echo "ERROR: Root Gradle build file not found."
+            exit 1
+          fi
+
       - name: Build debug APK
+        shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           if [ -f "./gradlew" ]; then
@@ -95,17 +110,25 @@ jobs:
           fi
 
       - name: Verify APK
+        shell: bash
         run: |
-          APK=$(find "$PROJECT_DIR" -type f -path "*/build/outputs/apk/debug/*.apk" | head -n 1)
+          APK=$(find "$PROJECT_DIR" \
+            -type f \
+            -path "*/build/outputs/apk/debug/*.apk" \
+            -print -quit)
 
           if [ -z "$APK" ]; then
-            echo "ERROR: APK file was not generated."
+            echo "ERROR: APK was not generated."
             exit 1
           fi
 
-          echo "APK generated successfully: $APK"
+          echo "APK found: $APK"
+
           mkdir -p output
           cp "$APK" output/AbuHamzaStore-debug.apk
+
+          echo "APK size:"
+          ls -lh output/AbuHamzaStore-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
