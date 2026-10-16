@@ -7,9 +7,6 @@ on:
       - 'AbuHamzaStore_APK_Build_Ready-1.zip'
       - '.github/workflows/build-apk.yml'
 
-permissions:
-  contents: read
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -33,56 +30,21 @@ jobs:
 
       - name: Extract project
         run: |
-          set -e
-
-          ZIP_FILE="AbuHamzaStore_APK_Build_Ready-1.zip"
-
-          test -f "$ZIP_FILE"
-
           mkdir -p project-unpacked
-          unzip -o "$ZIP_FILE" -d project-unpacked
+          unzip -o AbuHamzaStore_APK_Build_Ready-1.zip -d project-unpacked
 
-          PROJECT_FILE=$(find project-unpacked \
-            -type f \
+          PROJECT_DIR=$(find project-unpacked \
             \( -name settings.gradle -o -name settings.gradle.kts \) \
-            -print -quit)
+            -type f -print -quit | xargs -r dirname)
 
-          if [ -z "$PROJECT_FILE" ]; then
-            echo "ERROR: Could not find settings.gradle"
-            exit 1
-          fi
-
-          dirname "$PROJECT_FILE" > project_path.txt
-
-          echo "Project directory:"
-          cat project_path.txt
+          test -n "$PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Build APK
         run: |
-          set -e
-
-          PROJECT_DIR="$(cat project_path.txt)"
           cd "$PROJECT_DIR"
-
-          if [ ! -f gradlew ]; then
-            echo "ERROR: gradlew was not found"
-            exit 1
-          fi
-
           chmod +x gradlew
-
-          ./gradlew assembleDebug --stacktrace
-
-      - name: Find APK
-        run: |
-          find project-unpacked -type f -name '*.apk' -print
-
-          if ! find project-unpacked -type f \
-            -path '*/build/outputs/apk/debug/*.apk' \
-            | grep -q .; then
-            echo "ERROR: Debug APK was not generated"
-            exit 1
-          fi
+          ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
