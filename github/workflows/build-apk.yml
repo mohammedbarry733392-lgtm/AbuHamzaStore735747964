@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'AbuHamzaStore_APK_Build_Ready.zip'
+      - 'AbuHamzaStore_APK_Build_Ready-1.zip'
       - '.github/workflows/build-apk.yml'
 
 jobs:
