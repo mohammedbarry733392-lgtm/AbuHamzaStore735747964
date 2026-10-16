@@ -24,16 +24,24 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Accept Android SDK licenses
+        run: |
+          yes | sdkmanager --licenses || true
+
       - name: Extract project
         run: |
           mkdir -p project-unpacked
           unzip -o AbuHamzaStore_APK_Build_Ready-1.zip -d project-unpacked
-          find project-unpacked -name settings.gradle -exec dirname {} \; | head -n 1 > project_path.txt
-          test -s project_path.txt
+
+          PROJECT_DIR=$(find project-unpacked \
+            \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -type f -print -quit | xargs -r dirname)
+
+          test -n "$PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Build APK
         run: |
-          PROJECT_DIR="$(cat project_path.txt)"
           cd "$PROJECT_DIR"
           chmod +x gradlew
           ./gradlew assembleDebug
@@ -42,5 +50,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: AbuHamzaStore-APK
-          path: project-unpacked/**/app/build/outputs/apk/debug/*.apk
+          path: project-unpacked/**/build/outputs/apk/debug/*.apk
           if-no-files-found: error
