@@ -25,15 +25,33 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          log-accepted-android-sdk-licenses: false
-
-      - name: Install required Android SDK packages
+      - name: Configure Android SDK
+        shell: bash
         run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager --install \
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+
+          echo "Android SDK location: $ANDROID_HOME"
+          ls -la "$ANDROID_HOME"
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -f "$SDKMANAGER" ]; then
+            SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \
+              -type f -name sdkmanager -print -quit)
+          fi
+
+          if [ -z "$SDKMANAGER" ] || [ ! -f "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager was not found."
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses || true
+
+          "$SDKMANAGER" --install \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
@@ -47,7 +65,7 @@ jobs:
           elif [ -f "AbuHamzaStore_APK_Build_Ready-1.zip" ]; then
             echo "zip_file=AbuHamzaStore_APK_Build_Ready-1.zip" >> "$GITHUB_OUTPUT"
           else
-            echo "ERROR: No project ZIP found."
+            echo "ERROR: No project ZIP file found."
             exit 1
           fi
 
@@ -55,7 +73,9 @@ jobs:
         shell: bash
         run: |
           mkdir -p project-unpacked
-          unzip -o "${{ steps.select_zip.outputs.zip_file }}" -d project-unpacked
+
+          unzip -o "${{ steps.select_zip.outputs.zip_file }}" \
+            -d project-unpacked
 
           SETTINGS_FILE=$(find project-unpacked \
             -type f \( -name settings.gradle -o -name settings.gradle.kts \) \
@@ -69,19 +89,30 @@ jobs:
           PROJECT_DIR=$(dirname "$SETTINGS_FILE")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
+          echo "Project directory: $PROJECT_DIR"
+          ls -la "$PROJECT_DIR"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
-      - name: Check project
+      - name: Check project files
+        shell: bash
         run: |
-          test -d "$PROJECT_DIR/app" || {
+          if [ ! -d "$PROJECT_DIR/app" ]; then
             echo "ERROR: app directory not found."
             exit 1
-          }
+          fi
+
+          if [ ! -f "$PROJECT_DIR/app/build.gradle" ] && \
+             [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
+            echo "ERROR: App Gradle build file not found."
+            exit 1
+          fi
 
       - name: Build debug APK
+        shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           if [ -f "./gradlew" ]; then
@@ -92,8 +123,10 @@ jobs:
           fi
 
       - name: Verify APK
+        shell: bash
         run: |
-          APK=$(find "$PROJECT_DIR" -type f \
+          APK=$(find "$PROJECT_DIR" \
+            -type f \
             -path "*/build/outputs/apk/debug/*.apk" \
             -print -quit)
 
@@ -104,6 +137,8 @@ jobs:
 
           mkdir -p output
           cp "$APK" output/AbuHamzaStore-debug.apk
+
+          echo "APK successfully generated:"
           ls -lh output/AbuHamzaStore-debug.apk
 
       - name: Upload APK
