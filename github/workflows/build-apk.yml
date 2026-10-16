@@ -27,7 +27,7 @@ jobs:
       - name: Extract project
         run: |
           mkdir -p project-unpacked
-          unzip -o AbuHamzaStore_APK_Build_Ready.zip -d project-unpacked
+          unzip -o AbuHamzaStore_APK_Build_Ready-1.zip -d project-unpacked
           find project-unpacked -name settings.gradle -exec dirname {} \; | head -n 1 > project_path.txt
           test -s project_path.txt
 
