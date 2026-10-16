@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
+      - 'AbuHamzaStore_Kotlin_Fixed.zip'
       - 'AbuHamzaStore_APK_Build_Ready-1.zip'
       - '.github/workflows/build-apk.yml'
 
@@ -23,75 +24,93 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          accept-android-sdk-licenses: false
-          packages: ''
 
       - name: Accept Android SDK licenses
-        shell: bash
-        run: |
-          set +o pipefail
-          yes | sdkmanager --licenses
-          set -o pipefail
+        run: yes | sdkmanager --licenses || true
 
-      - name: Install Android platform tools
+      - name: Install Android SDK packages
         run: sdkmanager "platform-tools"
-
-      - name: Extract project
-        shell: bash
-        run: |
-          mkdir -p project-unpacked
-          unzip -o AbuHamzaStore_APK_Build_Ready-1.zip -d project-unpacked
-
-          echo "===== Project files ====="
-          find project-unpacked -maxdepth 5 -type f | sort | head -n 200
-
-          GRADLEW=$(find project-unpacked -type f -name gradlew -print -quit)
-
-          if [ -n "$GRADLEW" ]; then
-            PROJECT_DIR=$(dirname "$GRADLEW")
-          else
-            SETTINGS=$(find project-unpacked -type f \
-              \( -name settings.gradle -o -name settings.gradle.kts \) \
-              -print -quit)
-
-            if [ -z "$SETTINGS" ]; then
-              echo "ERROR: Gradle settings file not found."
-              exit 1
-            fi
-
-            PROJECT_DIR=$(dirname "$SETTINGS")
-          fi
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Project directory: $PROJECT_DIR"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
+      - name: Extract corrected project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -f AbuHamzaStore_Kotlin_Fixed.zip ]; then
+            ZIP_FILE="AbuHamzaStore_Kotlin_Fixed.zip"
+          elif [ -f AbuHamzaStore_APK_Build_Ready-1.zip ]; then
+            ZIP_FILE="AbuHamzaStore_APK_Build_Ready-1.zip"
+          else
+            echo "ERROR: Project ZIP not found."
+            exit 1
+          fi
+
+          mkdir -p project-unpacked
+          unzip -o "$ZIP_FILE" -d project-unpacked
+
+          SETTINGS=$(find project-unpacked -type f \
+            \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -print -quit)
+
+          if [ -z "$SETTINGS" ]; then
+            echo "ERROR: Gradle settings file not found."
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$SETTINGS")"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Project directory: $PROJECT_DIR"
+          find "$PROJECT_DIR" -maxdepth 3 -type f | sort | head -n 150
+
+      - name: Verify Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+
+          if [ ! -d app ]; then
+            echo "ERROR: app directory not found."
+            exit 1
+          fi
+
+          if [ ! -f build.gradle ] && [ ! -f build.gradle.kts ]; then
+            echo "ERROR: Root Gradle build file not found."
+            exit 1
+          fi
+
       - name: Build APK
         shell: bash
         run: |
+          set -euo pipefail
           cd "$PROJECT_DIR"
+          gradle --no-daemon assembleDebug
 
-          echo "===== Checking Gradle project ====="
-          ls -la
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          find "$PROJECT_DIR" -type f -name '*.apk' -print
 
-          if [ -f ./gradlew ]; then
-            chmod +x ./gradlew
-            ./gradlew --no-daemon assembleDebug
-          elif [ -f build.gradle ] || [ -f build.gradle.kts ]; then
-            gradle --no-daemon assembleDebug
-          else
-            echo "ERROR: No Gradle build file found in project root."
+          APK=$(find "$PROJECT_DIR" -type f \
+            -path '*/build/outputs/apk/debug/*.apk' \
+            -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not generated."
             exit 1
           fi
+
+          echo "APK generated: $APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: AbuHamzaStore-APK
-          path: project-unpacked/**/build/outputs/apk/debug/*.apk
+          path: ${{ env.PROJECT_DIR }}/**/build/outputs/apk/debug/*.apk
           if-no-files-found: error
