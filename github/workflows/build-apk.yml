@@ -4,18 +4,22 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'AbuHamzaStore_APK_Build_Ready-1.zip'
+      - '**.zip'
       - '.github/workflows/build-apk.yml'
+
+permissions:
+  contents: read
 
 jobs:
   build:
+    name: Build APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -23,50 +27,113 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          accept-android-sdk-licenses: false
-          packages: ''
 
-      - name: Accept Android SDK licenses
+      - name: Install Android SDK components
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Select project ZIP
+        id: select_zip
         shell: bash
         run: |
-          set +o pipefail
-          yes | sdkmanager --licenses
-          set -o pipefail
+          if [ -f "AbuHamzaStore_Kotlin_Fixed.zip" ]; then
+            echo "zip_file=AbuHamzaStore_Kotlin_Fixed.zip" >> "$GITHUB_OUTPUT"
+          elif [ -f "AbuHamzaStore_APK_Build_Ready-1.zip" ]; then
+            echo "zip_file=AbuHamzaStore_APK_Build_Ready-1.zip" >> "$GITHUB_OUTPUT"
+          else
+            echo "ERROR: No project ZIP file found in repository."
+            exit 1
+          fi
 
-      - name: Install Android platform tools
-        run: sdkmanager "platform-tools"
+          echo "Selected project: $(cat "$GITHUB_OUTPUT")"
 
       - name: Extract project
         shell: bash
         run: |
           mkdir -p project-unpacked
 
-          unzip -o AbuHamzaStore_APK_Build_Ready-1.zip \
+          unzip -o "${{ steps.select_zip.outputs.zip_file }}" \
             -d project-unpacked
 
-          PROJECT_DIR=$(find project-unpacked \
-            -type f \
-            \( -name settings.gradle \
-            -o -name settings.gradle.kts \) \
-            -print -quit | xargs -r dirname)
+          SETTINGS_FILE=$(find project-unpacked \
+            \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -type f -print -quit)
 
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Gradle settings file not found."
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERROR: settings.gradle was not found."
             exit 1
           fi
 
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Build APK
+          echo "Project directory: $PROJECT_DIR"
+          ls -la "$PROJECT_DIR"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Check project files
+        shell: bash
         run: |
-          cd "$PROJECT_DIR"
-          chmod +x gradlew
-          ./gradlew --no-daemon assembleDebug
+          if [ ! -d "$PROJECT_DIR/app" ]; then
+            echo "ERROR: app directory not found."
+            exit 1
+          fi
+
+          if [ ! -f "$PROJECT_DIR/app/build.gradle" ] && \
+             [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
+            echo "ERROR: App Gradle build file not found."
+            exit 1
+          fi
+
+          if [ ! -f "$PROJECT_DIR/build.gradle" ] && \
+             [ ! -f "$PROJECT_DIR/build.gradle.kts" ]; then
+            echo "ERROR: Root Gradle build file not found."
+            exit 1
+          fi
+
+      - name: Build debug APK
+        shell: bash
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew --no-daemon assembleDebug
+          else
+            gradle --no-daemon assembleDebug
+          fi
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          APK=$(find "$PROJECT_DIR" \
+            -type f \
+            -path "*/build/outputs/apk/debug/*.apk" \
+            -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not generated."
+            exit 1
+          fi
+
+          echo "APK found: $APK"
+
+          mkdir -p output
+          cp "$APK" output/AbuHamzaStore-debug.apk
+
+          echo "APK size:"
+          ls -lh output/AbuHamzaStore-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: AbuHamzaStore-APK
-          path: project-unpacked/**/build/outputs/apk/debug/*.apk
+          path: output/AbuHamzaStore-debug.apk
           if-no-files-found: error
+          retention-days: 7
