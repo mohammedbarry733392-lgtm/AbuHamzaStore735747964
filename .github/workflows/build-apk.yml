@@ -41,23 +41,18 @@ jobs:
         shell: bash
         run: |
           mkdir -p project-unpacked
-
-          unzip -o AbuHamzaStore_APK_Build_Ready-1.zip \
-            -d project-unpacked
+          unzip -o AbuHamzaStore_APK_Build_Ready-1.zip -d project-unpacked
 
           echo "===== Project files ====="
-          find project-unpacked -maxdepth 5 -type f \
-            | sort | head -n 200
+          find project-unpacked -maxdepth 5 -type f | sort | head -n 200
 
-          GRADLEW=$(find project-unpacked \
-            -type f -name gradlew -print -quit)
+          GRADLEW=$(find project-unpacked -type f -name gradlew -print -quit)
 
           if [ -n "$GRADLEW" ]; then
             PROJECT_DIR=$(dirname "$GRADLEW")
           else
             SETTINGS=$(find project-unpacked -type f \
-              \( -name settings.gradle \
-              -o -name settings.gradle.kts \) \
+              \( -name settings.gradle -o -name settings.gradle.kts \) \
               -print -quit)
 
             if [ -z "$SETTINGS" ]; then
@@ -71,12 +66,7 @@ jobs:
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
           echo "Project directory: $PROJECT_DIR"
 
-            - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.7'
-
-            - name: Set up Gradle
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
@@ -89,13 +79,15 @@ jobs:
           echo "===== Checking Gradle project ====="
           ls -la
 
-          if [ ! -f build.gradle ] && [ ! -f build.gradle.kts ]; then
-            echo "ERROR: Build configuration not found in project root."
+          if [ -f ./gradlew ]; then
+            chmod +x ./gradlew
+            ./gradlew --no-daemon assembleDebug
+          elif [ -f build.gradle ] || [ -f build.gradle.kts ]; then
+            gradle --no-daemon assembleDebug
+          else
+            echo "ERROR: No Gradle build file found in project root."
             exit 1
           fi
-
-          gradle --no-daemon assembleDebug
-          gradle --no-daemon assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
