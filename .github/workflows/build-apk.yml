@@ -23,28 +23,46 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: false
+          packages: ''
 
       - name: Accept Android SDK licenses
+        shell: bash
         run: |
-          yes | sdkmanager --licenses || true
+          set +o pipefail
+          yes | sdkmanager --licenses
+          set -o pipefail
+
+      - name: Install Android platform tools
+        run: sdkmanager "platform-tools"
 
       - name: Extract project
+        shell: bash
         run: |
           mkdir -p project-unpacked
-          unzip -o AbuHamzaStore_APK_Build_Ready-1.zip -d project-unpacked
+
+          unzip -o AbuHamzaStore_APK_Build_Ready-1.zip \
+            -d project-unpacked
 
           PROJECT_DIR=$(find project-unpacked \
-            \( -name settings.gradle -o -name settings.gradle.kts \) \
-            -type f -print -quit | xargs -r dirname)
+            -type f \
+            \( -name settings.gradle \
+            -o -name settings.gradle.kts \) \
+            -print -quit | xargs -r dirname)
 
-          test -n "$PROJECT_DIR"
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Gradle settings file not found."
+            exit 1
+          fi
+
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Build APK
         run: |
           cd "$PROJECT_DIR"
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew --no-daemon assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
