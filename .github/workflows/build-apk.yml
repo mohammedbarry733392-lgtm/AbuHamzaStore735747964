@@ -91,55 +91,35 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Fix Java and Kotlin JVM targets
+      name: Force Java and Kotlin JVM target 17
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
+          cat > "$RUNNER_TEMP/force-jvm-target.gradle" <<'GRADLE'
+          allprojects {
+              tasks.withType(org.gradle.api.tasks.compile.JavaCompile).configureEach {
+                  sourceCompatibility = "17"
+                  targetCompatibility = "17"
+              }
+          }
 
-          root = Path("project-unpacked")
+          gradle.projectsEvaluated {
+              allprojects {
+                  tasks.configureEach { task ->
+                      if (task.name.toLowerCase().contains("compile") &&
+                          task.name.toLowerCase().contains("kotlin")) {
+                          task.doFirst {
+                              def targetProperty = task.property("compilerOptions")
+                              if (targetProperty != null) {
+                                  println("Kotlin compilation task: ${task.name}")
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+          GRADLE
 
-          gradle_files = list(root.rglob("*.gradle"))
-          gradle_files += list(root.rglob("*.gradle.kts"))
-
-          for file in gradle_files:
-              text = file.read_text(encoding="utf-8")
-              original = text
-
-              # Set Java source and target compatibility to Java 17.
-              text = re.sub(
-                  r'JavaVersion\.VERSION_1_8',
-                  'JavaVersion.VERSION_17',
-                  text
-              )
-
-              # Set Kotlin JVM target to 17 in common Gradle syntax.
-              text = re.sub(
-                  r'(?m)(jvmTarget\s*=\s*)["\']1\.8["\']',
-                  r'\g<1>"17"',
-                  text
-              )
-
-              text = re.sub(
-                  r'(?m)(jvmTarget\s*=\s*)["\']8["\']',
-                  r'\g<1>"17"',
-                  text
-              )
-
-              # Handle Kotlin compilerOptions syntax.
-              text = re.sub(
-                  r'JvmTarget\.JVM_1_8',
-                  'JvmTarget.JVM_17',
-                  text
-              )
-
-              if text != original:
-                  file.write_text(text, encoding="utf-8")
-                  print(f"Updated JVM settings: {file}")
-              else:
-                  print(f"No matching JVM settings: {file}")
-          PY
+          echo "JVM compatibility configuration created."
 
       - name: Check project files
         shell: bash
@@ -156,14 +136,21 @@ jobs:
           fi
 
       - name: Build debug APK
+      name: Build debug APK
         shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
-            ./gradlew --no-daemon assembleDebug
+            ./gradlew \
+              --no-daemon \
+              -I "$RUNNER_TEMP/force-jvm-target.gradle" \
+              assembleDebug
           else
-            gradle --no-daemon assembleDebug
+            gradle \
+              --no-daemon \
+              -I "$RUNNER_TEMP/force-jvm-target.gradle" \
+              assembleDebug
           fi
 
       - name: Verify APK
