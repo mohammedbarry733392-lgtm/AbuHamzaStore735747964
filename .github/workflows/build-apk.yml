@@ -25,7 +25,9 @@ jobs:
         shell: bash
         run: |
           set -e
+
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "platform-tools" \
             "platforms;android-35" \
@@ -35,7 +37,13 @@ jobs:
         shell: bash
         run: |
           set -e
+
           mkdir -p project-unpacked
+
+          if [ ! -f "AbuHamzaStore_APK_Build_Ready-1.zip" ]; then
+            echo "ERROR: Project ZIP file not found."
+            exit 1
+          fi
 
           unzip -o AbuHamzaStore_APK_Build_Ready-1.zip \
             -d project-unpacked
@@ -60,6 +68,7 @@ jobs:
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
           echo "Project directory: $PROJECT_DIR"
 
       - name: Set up Gradle
@@ -67,7 +76,7 @@ jobs:
         with:
           gradle-version: '8.7'
 
-    - name: Fix Java and Kotlin JVM targets
+      - name: Fix Java and Kotlin JVM targets
         shell: bash
         run: |
           set -e
@@ -80,32 +89,62 @@ jobs:
           fi
 
           python3 - "$BUILD_FILE" <<'PY'
+          import re
           import sys
           from pathlib import Path
 
           path = Path(sys.argv[1])
           content = path.read_text()
 
-          if "sourceCompatibility JavaVersion.VERSION_17" not in content:
-              content = content.replace(
-                  "android {",
-                  """android {
-              compileOptions {
+          compile_options = """compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
                   targetCompatibility JavaVersion.VERSION_17
-              }""",
-                  1
+              }"""
+
+          pattern = r'compileOptions\s*\{[^{}]*\}'
+
+          if re.search(pattern, content, flags=re.S):
+              content = re.sub(
+                  pattern,
+                  compile_options,
+                  content,
+                  count=1,
+                  flags=re.S
+              )
+          else:
+              android_pattern = r'android\s*\{'
+
+              if not re.search(android_pattern, content):
+                  raise SystemExit(
+                      "ERROR: android { block not found in app/build.gradle"
+                  )
+
+              content = re.sub(
+                  android_pattern,
+                  lambda match: match.group(0) + "\n    " + compile_options,
+                  content,
+                  count=1
               )
 
           path.write_text(content)
 
-          print("Updated Android Java compatibility to JVM 17.")
-          print(path.read_text())
+          print("Java compatibility configured for JVM 17.")
+          print("Updated file:", path)
           PY
+
+      - name: Verify Java compatibility settings
+        shell: bash
+        run: |
+          set -e
+
+          echo "Checking app/build.gradle:"
+          cat "$PROJECT_DIR/app/build.gradle"
+
       - name: Build APK
         shell: bash
         run: |
           set -e
+
           cd "$PROJECT_DIR"
 
           echo "Checking project files..."
