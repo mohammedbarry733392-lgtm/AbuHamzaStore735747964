@@ -67,6 +67,29 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Align Java target with Kotlin JVM 17
+        shell: bash
+        run: |
+          set -e
+
+          BUILD_FILE="$PROJECT_DIR/app/build.gradle"
+
+          if [ ! -f "$BUILD_FILE" ]; then
+            echo "ERROR: app/build.gradle not found."
+            exit 1
+          fi
+
+          cat >> "$BUILD_FILE" <<'EOF'
+
+          // Match Java compilation target with Kotlin JVM 17.
+          tasks.withType(org.gradle.api.tasks.compile.JavaCompile).configureEach {
+              sourceCompatibility = JavaVersion.VERSION_17.toString()
+              targetCompatibility = JavaVersion.VERSION_17.toString()
+          }
+          EOF
+
+          echo "Java target configured to 17."
+
       - name: Build APK
         shell: bash
         run: |
@@ -79,12 +102,8 @@ jobs:
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
             ./gradlew --no-daemon assembleDebug
-          elif [ -f "build.gradle" ] \
-            || [ -f "build.gradle.kts" ]; then
-            gradle --no-daemon assembleDebug
           else
-            echo "ERROR: Gradle build file not found."
-            exit 1
+            gradle --no-daemon assembleDebug
           fi
 
       - name: Upload APK
