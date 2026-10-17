@@ -4,15 +4,11 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - '**.zip'
+      - 'AbuHamzaStore_APK_Build_Ready-1.zip'
       - '.github/workflows/build-apk.yml'
-
-permissions:
-  contents: read
 
 jobs:
   build:
-    name: Build APK
     runs-on: ubuntu-latest
 
     steps:
@@ -25,64 +21,45 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Configure Android SDK
-        shell: bash
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
-
       - name: Install Android SDK packages
         shell: bash
         run: |
-          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \
-            -type f -name sdkmanager -print -quit)
-
-          if [ -z "$SDKMANAGER" ]; then
-            echo "ERROR: sdkmanager not found."
-            exit 1
-          fi
-
-          yes | "$SDKMANAGER" --licenses || true
-
-          "$SDKMANAGER" --install \
+          set -e
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Select project ZIP
-        id: select_zip
-        shell: bash
-        run: |
-          if [ -f "AbuHamzaStore_Kotlin_Fixed.zip" ]; then
-            echo "zip_file=AbuHamzaStore_Kotlin_Fixed.zip" >> "$GITHUB_OUTPUT"
-          elif [ -f "AbuHamzaStore_APK_Build_Ready-1.zip" ]; then
-            echo "zip_file=AbuHamzaStore_APK_Build_Ready-1.zip" >> "$GITHUB_OUTPUT"
-          else
-            echo "ERROR: Project ZIP not found."
-            exit 1
-          fi
-
       - name: Extract project
         shell: bash
         run: |
+          set -e
           mkdir -p project-unpacked
 
-          unzip -o "${{ steps.select_zip.outputs.zip_file }}" \
+          unzip -o AbuHamzaStore_APK_Build_Ready-1.zip \
             -d project-unpacked
 
-          SETTINGS_FILE=$(find project-unpacked \
-            -type f \
-            \( -name settings.gradle -o -name settings.gradle.kts \) \
-            -print -quit)
+          GRADLEW=$(find project-unpacked -type f \
+            -name gradlew -print -quit)
 
-          if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERROR: Gradle settings file not found."
-            exit 1
+          if [ -n "$GRADLEW" ]; then
+            PROJECT_DIR=$(dirname "$GRADLEW")
+          else
+            SETTINGS=$(find project-unpacked -type f \
+              \( -name settings.gradle \
+              -o -name settings.gradle.kts \) \
+              -print -quit)
+
+            if [ -z "$SETTINGS" ]; then
+              echo "ERROR: Gradle settings file not found."
+              exit 1
+            fi
+
+            PROJECT_DIR=$(dirname "$SETTINGS")
           fi
 
-          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
           echo "Project directory: $PROJECT_DIR"
 
       - name: Set up Gradle
@@ -90,94 +67,29 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Create JVM compatibility init script
+      - name: Build APK
         shell: bash
         run: |
-          cat > "$RUNNER_TEMP/force-jvm-target.gradle" <<'GRADLE'
-          allprojects {
-              tasks.withType(
-                  org.gradle.api.tasks.compile.JavaCompile
-              ).configureEach {
-                  sourceCompatibility = "17"
-                  targetCompatibility = "17"
-              }
+          set -e
+          cd "$PROJECT_DIR"
 
-              tasks.configureEach { task ->
-                  if (task.name.toLowerCase().contains("compile") &&
-                      task.name.toLowerCase().contains("kotlin")) {
+          echo "Checking project files..."
+          ls -la
 
-                      task.doFirst {
-                          def kotlinOptions = task.hasProperty("kotlinOptions") ?
-                              task.property("kotlinOptions") : null
-
-                          if (kotlinOptions != null) {
-                              kotlinOptions.jvmTarget = "17"
-                          }
-
-                          println("Checking Kotlin JVM target for ${task.path}")
-                      }
-                  }
-              }
-          }
-          GRADLE
-
-          echo "JVM compatibility script created."
-
-      - name: Check project files
-        shell: bash
-        run: |
-          if [ ! -d "$PROJECT_DIR/app" ]; then
-            echo "ERROR: app directory not found."
-            exit 1
-          fi
-
-          if [ ! -f "$PROJECT_DIR/app/build.gradle" ] && \
-             [ ! -f "$PROJECT_DIR/app/build.gradle.kts" ]; then
-            echo "ERROR: App Gradle file not found."
-            exit 1
-          fi
-
-      - name: Build debug APK
-        shell: bash
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
-
-            ./gradlew \
-              --no-daemon \
-              -I "$RUNNER_TEMP/force-jvm-target.gradle" \
-              assembleDebug
+            ./gradlew --no-daemon assembleDebug
+          elif [ -f "build.gradle" ] \
+            || [ -f "build.gradle.kts" ]; then
+            gradle --no-daemon assembleDebug
           else
-            gradle \
-              --no-daemon \
-              -I "$RUNNER_TEMP/force-jvm-target.gradle" \
-              assembleDebug
-          fi
-
-      - name: Verify APK
-        shell: bash
-        run: |
-          APK=$(find "$PROJECT_DIR" \
-            -type f \
-            -path "*/build/outputs/apk/debug/*.apk" \
-            -print -quit)
-
-          if [ -z "$APK" ]; then
-            echo "ERROR: APK was not generated."
+            echo "ERROR: Gradle build file not found."
             exit 1
           fi
-
-          mkdir -p output
-          cp "$APK" output/AbuHamzaStore-debug.apk
-
-          echo "APK generated:"
-          ls -lh output/AbuHamzaStore-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: AbuHamzaStore-APK
-          path: output/AbuHamzaStore-debug.apk
+          path: project-unpacked/**/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          retention-days: 7
