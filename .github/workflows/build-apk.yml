@@ -30,7 +30,6 @@ jobs:
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
-          echo "Android SDK: $ANDROID_HOME"
 
       - name: Install Android SDK packages
         shell: bash
@@ -91,35 +90,38 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      name: Force Java and Kotlin JVM target 17
+      - name: Create JVM compatibility init script
         shell: bash
         run: |
           cat > "$RUNNER_TEMP/force-jvm-target.gradle" <<'GRADLE'
           allprojects {
-              tasks.withType(org.gradle.api.tasks.compile.JavaCompile).configureEach {
+              tasks.withType(
+                  org.gradle.api.tasks.compile.JavaCompile
+              ).configureEach {
                   sourceCompatibility = "17"
                   targetCompatibility = "17"
               }
-          }
 
-          gradle.projectsEvaluated {
-              allprojects {
-                  tasks.configureEach { task ->
-                      if (task.name.toLowerCase().contains("compile") &&
-                          task.name.toLowerCase().contains("kotlin")) {
-                          task.doFirst {
-                              def targetProperty = task.property("compilerOptions")
-                              if (targetProperty != null) {
-                                  println("Kotlin compilation task: ${task.name}")
-                              }
+              tasks.configureEach { task ->
+                  if (task.name.toLowerCase().contains("compile") &&
+                      task.name.toLowerCase().contains("kotlin")) {
+
+                      task.doFirst {
+                          def kotlinOptions = task.hasProperty("kotlinOptions") ?
+                              task.property("kotlinOptions") : null
+
+                          if (kotlinOptions != null) {
+                              kotlinOptions.jvmTarget = "17"
                           }
+
+                          println("Checking Kotlin JVM target for ${task.path}")
                       }
                   }
               }
           }
           GRADLE
 
-          echo "JVM compatibility configuration created."
+          echo "JVM compatibility script created."
 
       - name: Check project files
         shell: bash
@@ -136,12 +138,12 @@ jobs:
           fi
 
       - name: Build debug APK
-      name: Build debug APK
         shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
+
             ./gradlew \
               --no-daemon \
               -I "$RUNNER_TEMP/force-jvm-target.gradle" \
@@ -169,7 +171,7 @@ jobs:
           mkdir -p output
           cp "$APK" output/AbuHamzaStore-debug.apk
 
-          echo "APK generated successfully."
+          echo "APK generated:"
           ls -lh output/AbuHamzaStore-debug.apk
 
       - name: Upload APK
