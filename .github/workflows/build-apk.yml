@@ -67,7 +67,7 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Align Java target with Kotlin JVM 17
+    - name: Fix Java and Kotlin JVM targets
         shell: bash
         run: |
           set -e
@@ -79,17 +79,29 @@ jobs:
             exit 1
           fi
 
-          cat >> "$BUILD_FILE" <<'EOF'
+          python3 - "$BUILD_FILE" <<'PY'
+          import sys
+          from pathlib import Path
 
-          // Match Java compilation target with Kotlin JVM 17.
-          tasks.withType(org.gradle.api.tasks.compile.JavaCompile).configureEach {
-              sourceCompatibility = JavaVersion.VERSION_17.toString()
-              targetCompatibility = JavaVersion.VERSION_17.toString()
-          }
-          EOF
+          path = Path(sys.argv[1])
+          content = path.read_text()
 
-          echo "Java target configured to 17."
+          if "sourceCompatibility JavaVersion.VERSION_17" not in content:
+              content = content.replace(
+                  "android {",
+                  """android {
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }""",
+                  1
+              )
 
+          path.write_text(content)
+
+          print("Updated Android Java compatibility to JVM 17.")
+          print(path.read_text())
+          PY
       - name: Build APK
         shell: bash
         run: |
