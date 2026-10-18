@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Download project files
         uses: actions/checkout@v4
 
       - name: Set up Java 17
@@ -24,50 +24,76 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Locate Android project
-        id: project
+      - name: Extract Android project
         shell: bash
         run: |
-          echo "Searching for Android Gradle project..."
+          set -e
 
-          find . -type f \( \
-            -name settings.gradle \
-            -o -name settings.gradle.kts \
-          \) -not -path './.git/*' -print
+          echo "Searching for Kotlin project ZIP..."
 
-          PROJECT_DIR=""
+          ZIP_FILE="$(find . -type f \
+            -iname '*Kotlin*Fixed*.zip' \
+            -not -path './.git/*' \
+            -print -quit)"
 
-          if [ -f "settings.gradle" ] || [ -f "settings.gradle.kts" ]; then
-            PROJECT_DIR="."
-          else
-            for file in $(find . -type f \( \
-              -name settings.gradle \
-              -o -name settings.gradle.kts \
-            \) -not -path './.git/*'); do
-              PROJECT_DIR="$(dirname "$file")"
-              break
-            done
-          fi
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: No Gradle settings file found."
-            echo "The Android project may still be inside a ZIP file."
+          if [ -z "$ZIP_FILE" ]; then
+            echo "Kotlin project ZIP not found."
+            echo "Available ZIP files:"
+            find . -type f -iname '*.zip' -print
             exit 1
           fi
 
+          echo "Found project: $ZIP_FILE"
+
+          mkdir -p extracted-project
+
+          unzip -q "$ZIP_FILE" -d extracted-project
+
+          echo "Extracted files:"
+          find extracted-project -maxdepth 4 -type f | head -100
+
+      - name: Locate Gradle project
+        id: locate
+        shell: bash
+        run: |
+          set -e
+
+          SETTINGS_FILE="$(find extracted-project -type f \
+            \( -name settings.gradle \
+            -o -name settings.gradle.kts \) \
+            -print -quit)"
+
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "No Gradle settings file found."
+            echo "Checking for build.gradle files..."
+
+            find extracted-project -type f \
+              \( -name build.gradle \
+              -o -name build.gradle.kts \) -print
+
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
+
           echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
-          echo "Android project found at: $PROJECT_DIR"
+
+          echo "Android project directory: $PROJECT_DIR"
+
+          ls -la "$PROJECT_DIR"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build Debug APK
+      - name: Build Android APK
         shell: bash
         run: |
-          cd "${{ steps.project.outputs.project_dir }}"
+          set -e
 
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
+          cd "${{ steps.locate.outputs.project_dir }}"
+
+          if [ -f gradlew ]; then
+            chmod +x gradlew
             ./gradlew assembleDebug --no-daemon
           else
             gradle assembleDebug --no-daemon
@@ -77,6 +103,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: AbuHamzaStore-APK
-          path: '**/build/outputs/apk/**/*.apk'
+          path: extracted-project/**/build/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 14
