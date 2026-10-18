@@ -3,16 +3,26 @@ name: Build Abu Hamza Store APK
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     paths:
-      - 'AbuHamzaStore_APK_Build_Ready-1.zip'
+      - 'app/**'
+      - 'build.gradle'
+      - 'settings.gradle'
+      - 'gradle.properties'
       - '.github/workflows/build-apk.yml'
+
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout project
         uses: actions/checkout@v4
 
       - name: Set up Java 17
@@ -21,145 +31,32 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Android SDK packages
-        shell: bash
-        run: |
-          set -e
-
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
-
-      - name: Extract project
-        shell: bash
-        run: |
-          set -e
-
-          mkdir -p project-unpacked
-
-          if [ ! -f "AbuHamzaStore_APK_Build_Ready-1.zip" ]; then
-            echo "ERROR: Project ZIP file not found."
-            exit 1
-          fi
-
-          unzip -o AbuHamzaStore_APK_Build_Ready-1.zip \
-            -d project-unpacked
-
-          GRADLEW=$(find project-unpacked -type f \
-            -name gradlew -print -quit)
-
-          if [ -n "$GRADLEW" ]; then
-            PROJECT_DIR=$(dirname "$GRADLEW")
-          else
-            SETTINGS=$(find project-unpacked -type f \
-              \( -name settings.gradle \
-              -o -name settings.gradle.kts \) \
-              -print -quit)
-
-            if [ -z "$SETTINGS" ]; then
-              echo "ERROR: Gradle settings file not found."
-              exit 1
-            fi
-
-            PROJECT_DIR=$(dirname "$SETTINGS")
-          fi
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-          echo "Project directory: $PROJECT_DIR"
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.7'
 
-      - name: Fix Java and Kotlin JVM targets
-        shell: bash
+      - name: Grant execute permission
         run: |
-          set -e
-
-          BUILD_FILE="$PROJECT_DIR/app/build.gradle"
-
-          if [ ! -f "$BUILD_FILE" ]; then
-            echo "ERROR: app/build.gradle not found."
-            exit 1
-          fi
-
-          python3 - "$BUILD_FILE" <<'PY'
-          import re
-          import sys
-          from pathlib import Path
-
-          path = Path(sys.argv[1])
-          content = path.read_text()
-
-          compile_options = """compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
-              }"""
-
-          pattern = r'compileOptions\s*\{[^{}]*\}'
-
-          if re.search(pattern, content, flags=re.S):
-              content = re.sub(
-                  pattern,
-                  compile_options,
-                  content,
-                  count=1,
-                  flags=re.S
-              )
-          else:
-              android_pattern = r'android\s*\{'
-
-              if not re.search(android_pattern, content):
-                  raise SystemExit(
-                      "ERROR: android { block not found in app/build.gradle"
-                  )
-
-              content = re.sub(
-                  android_pattern,
-                  lambda match: match.group(0) + "\n    " + compile_options,
-                  content,
-                  count=1
-              )
-
-          path.write_text(content)
-
-          print("Java compatibility configured for JVM 17.")
-          print("Updated file:", path)
-          PY
-
-      - name: Verify Java compatibility settings
-        shell: bash
-        run: |
-          set -e
-
-          echo "Checking app/build.gradle:"
-          cat "$PROJECT_DIR/app/build.gradle"
-
-      - name: Build APK
-        shell: bash
-        run: |
-          set -e
-
-          cd "$PROJECT_DIR"
-
-          echo "Checking project files..."
-          ls -la
-
-          if [ -f "./gradlew" ]; then
+          if [ -f ./gradlew ]; then
             chmod +x ./gradlew
-            ./gradlew --no-daemon assembleDebug
-          else
-            gradle --no-daemon assembleDebug
           fi
+
+      - name: Build Debug APK
+        run: |
+          if [ -f ./gradlew ]; then
+            ./gradlew assembleDebug --no-daemon
+          else
+            gradle assembleDebug --no-daemon
+          fi
+
+      - name: Find APK
+        run: |
+          echo "Checking APK files..."
+          find app/build/outputs/apk -type f -name "*.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: AbuHamzaStore-APK
-          path: project-unpacked/**/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/**/*.apk
           if-no-files-found: error
+          retention-days: 14
